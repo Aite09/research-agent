@@ -10,15 +10,16 @@ Why a Critic agent?
   usage, and clarity. Reports scoring below 7 are sent back to the Writer
   with specific instructions — creating a self-correcting feedback loop.
 
-Routing (decided in graph/workflow.py, based on state after this node):
-  score >= 7 OR revision_count >= 2  →  END
-  score < 7  AND revision_count < 2  →  writer (revision loop)
+Routing: critic_node makes the accept/revise decision and records it in
+state["status"]; route_after_critic only reads that status.
+  score >= 7 OR revision_count >= 2  →  status "done"     →  END
+  score < 7  AND revision_count < 2  →  status "writing"  →  writer (revision_count + 1)
+revision_count counts revisions actually requested, so at most 2 rewrites run.
 """
 
-import os
 import re
 
-from groq import Groq
+from agents.llm import chat
 
 from graph.state import AgentState
 
@@ -28,14 +29,6 @@ MAX_TOKENS = 500
 TEMPERATURE = 0.3    # Low — Critic must be consistent and deterministic
 QUALITY_THRESHOLD = 7.0
 MAX_REVISIONS = 2
-
-
-def _build_client() -> Groq:
-    """Initialise Groq client from environment."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise EnvironmentError("GROQ_API_KEY not set in environment.")
-    return Groq(api_key=api_key)
 
 
 def _parse_score(raw: str) -> float:
@@ -84,7 +77,7 @@ def critic_node(state: AgentState) -> dict:
     Writes:
         quality_score  — float 1–10.
         critique       — written feedback for Writer (empty if score >= 7).
-        revision_count — incremented by 1.
+        revision_count — incremented by 1 only when a revision is requested.
         status         — "done" if passing, "writing" if revision needed.
         messages       — appended with critic turn.
         error          — set if LLM call fails.
@@ -107,7 +100,7 @@ def critic_node(state: AgentState) -> dict:
         return {
             "quality_score": 0.0,
             "critique": error_msg,
-            "revision_count": revision_count + 1,
+            "revision_count": revision_count,
             "status": "error",
             "error": error_msg,
             "messages": state.get("messages", []) + [
@@ -116,8 +109,6 @@ def critic_node(state: AgentState) -> dict:
         }
 
     try:
-        client = _build_client()
-
         system_prompt = (
             "You are a rigorous research quality reviewer. Evaluate the report below "
             "against the original research question and assign a score.\n\n"
@@ -141,19 +132,15 @@ def critic_node(state: AgentState) -> dict:
             f"Report to Evaluate:\n\n{report}"
         )
 
-        response = client.chat.completions.create(
+        raw_output = chat(
+            agent="critic",
             model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
         )
-
-        raw_output = response.choices[0].message.content or ""
         score = _parse_score(raw_output)
-        new_revision_count = revision_count + 1
 
         print(f"[CRITIC] Score: {score}/10 — Revision {revision_count}/{MAX_REVISIONS}")
 
@@ -167,7 +154,7 @@ def critic_node(state: AgentState) -> dict:
             return {
                 "quality_score": score,
                 "critique": raw_output,
-                "revision_count": new_revision_count,
+                "revision_count": revision_count,
                 "status": "done",
                 "error": "",
                 "messages": state.get("messages", []) + [
@@ -179,7 +166,7 @@ def critic_node(state: AgentState) -> dict:
             return {
                 "quality_score": score,
                 "critique": raw_output,
-                "revision_count": new_revision_count,
+                "revision_count": revision_count + 1,
                 "status": "writing",
                 "error": "",
                 "messages": state.get("messages", []) + [
@@ -193,7 +180,7 @@ def critic_node(state: AgentState) -> dict:
         return {
             "quality_score": 0.0,
             "critique": "",
-            "revision_count": revision_count + 1,
+            "revision_count": revision_count,
             "status": "error",
             "error": error_msg,
             "messages": state.get("messages", []) + [
@@ -212,12 +199,13 @@ def route_after_critic(state: AgentState) -> str:
         state: Current AgentState (after critic_node has run).
 
     Returns:
-        "end"    — if report passes or max revisions reached.
-        "writer" — if report needs revision.
+        "end"    — report accepted, max revisions reached, or critic error.
+        "writer" — critic requested a revision (status == "writing").
     """
-    score = state.get("quality_score", 0.0)
-    revision_count = state.get("revision_count", 0)
-
-    if score >= QUALITY_THRESHOLD or revision_count >= MAX_REVISIONS:
-        return "end"
-    return "writer"
+    # critic_node already applied the threshold and revision cap. Re-deriving
+    # the decision here from the incremented revision_count caused an
+    # off-by-one: only 1 revision ever ran, and critic errors looped back to
+    # the writer instead of ending the run.
+    if state.get("status") == "writing":
+        return "writer"
+    return "end"

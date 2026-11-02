@@ -17,7 +17,7 @@ import type { AgentStep, AgentName, PipelineStatus, ResearchResult, WsEvent } fr
 
 gsap.registerPlugin()
 
-const WS_URL = 'ws://localhost:8000/ws/research'
+const WS_URL = 'ws://localhost:8001/ws/research'
 
 const EXAMPLES = [
   'Impact of AI on Toronto job market in 2025',

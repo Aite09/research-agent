@@ -14,7 +14,7 @@ WebSocket event format (JSON):
   {"type": "error",        "message": "..."}
 
 Run with:
-  uvicorn api.main:app --reload --port 8000
+  uvicorn api.main:app --reload --port 8001
 """
 
 import asyncio
@@ -175,6 +175,30 @@ def _chunk_to_event(chunk: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
+def _complete_event(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build the final WebSocket "complete" event from a finished pipeline state.
+
+    Args:
+        state: Final AgentState (as a plain dict) from the streamed run.
+
+    Returns:
+        Event dict with the report and summary stats.
+    """
+    report = state.get("report", "")
+    results = state.get("search_results", [])
+    return {
+        "type": "complete",
+        "report": report,
+        "quality_score": state.get("quality_score", 0.0),
+        "revision_count": state.get("revision_count", 0),
+        "search_queries": state.get("search_queries", []),
+        "word_count": len(report.split()),
+        "source_count": len(set(r.get("url", "") for r in results if r.get("url"))),
+        "status": state.get("status", "done"),
+    }
+
+
 # ── REST endpoint ─────────────────────────────────────────────────────────────
 @app.post("/api/research", response_model=ResearchResponse)
 async def research(request: ResearchRequest) -> ResearchResponse:
@@ -241,11 +265,12 @@ async def research_websocket(websocket: WebSocket) -> None:
         def _run_pipeline() -> None:
             """Run LangGraph pipeline in thread, push events to queue."""
             try:
-                # Send agent_start before each node runs
-                # LangGraph streams completed node outputs — we infer starts
-                # from the sequence: planner → search → writer → critic
-                agent_sequence = ["planner", "search", "writer", "critic"]
-                agent_iter = iter(agent_sequence)
+                # Each chunk is one node's partial update. Folding them into a
+                # copy of the initial state yields this run's final state, so
+                # the "complete" event needs no second graph.invoke() (which
+                # used to re-run every LLM + Tavily call and return a different report).
+                final_state: dict[str, Any] = dict(initial_state)
+                failed = False
 
                 for chunk in graph.stream(initial_state):
                     node_name = next(iter(chunk))
@@ -271,6 +296,7 @@ async def research_websocket(websocket: WebSocket) -> None:
 
                     # Check for pipeline error
                     node_state = chunk[node_name]
+                    final_state.update(node_state)
                     if node_state.get("status") == "error":
                         loop.call_soon_threadsafe(
                             event_queue.put_nowait,
@@ -279,7 +305,13 @@ async def research_websocket(websocket: WebSocket) -> None:
                                 "message": node_state.get("error", "Unknown error"),
                             },
                         )
+                        failed = True
                         break
+
+                if not failed:
+                    loop.call_soon_threadsafe(
+                        event_queue.put_nowait, _complete_event(final_state)
+                    )
 
                 # Signal completion
                 loop.call_soon_threadsafe(event_queue.put_nowait, None)
@@ -294,9 +326,6 @@ async def research_websocket(websocket: WebSocket) -> None:
         # Start pipeline in background thread
         _executor.submit(_run_pipeline)
 
-        # Collect final state for the complete event
-        last_state_data: dict[str, Any] = {}
-
         # Stream events to WebSocket as they arrive
         while True:
             event = await event_queue.get()
@@ -305,31 +334,6 @@ async def research_websocket(websocket: WebSocket) -> None:
                 break  # Pipeline finished
 
             await websocket.send_json(event)
-
-            # Capture data for final "complete" event
-            if event.get("type") == "agent_done" and event.get("agent") == "critic":
-                last_state_data = event.get("data", {})
-
-        # Re-run synchronously to get final state for complete event
-        # (stream() doesn't easily return final state)
-        final_state: AgentState = await loop.run_in_executor(
-            _executor,
-            lambda: graph.invoke(initial_state),
-        )
-
-        report = final_state.get("report", "")
-        results = final_state.get("search_results", [])
-
-        await websocket.send_json({
-            "type": "complete",
-            "report": report,
-            "quality_score": final_state.get("quality_score", 0.0),
-            "revision_count": final_state.get("revision_count", 0),
-            "search_queries": final_state.get("search_queries", []),
-            "word_count": len(report.split()),
-            "source_count": len(set(r.get("url", "") for r in results if r.get("url"))),
-            "status": final_state.get("status", "done"),
-        })
 
     except WebSocketDisconnect:
         pass

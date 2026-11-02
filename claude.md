@@ -7,7 +7,7 @@
 
 ## Project Purpose
 
-User submits research query → 4 specialized Claude-powered agents collaborate autonomously → structured, self-corrected markdown report with sources and quality score.
+User submits research query → 4 specialized LLM agents (Groq, Llama 3.3 70B) collaborate autonomously → structured, self-corrected markdown report with sources and quality score.
 
 ---
 
@@ -55,6 +55,7 @@ START → planner → search → writer → critic → END
 research-agent/
 ├── agents/
 │   ├── __init__.py              # Package init
+│   ├── llm.py                   # Shared Groq wrapper: latency, tokens, cost, observability
 │   ├── planner_agent.py         # Query decomposition
 │   ├── search_agent.py          # Tavily web search
 │   ├── writer_agent.py          # Report synthesis
@@ -64,8 +65,12 @@ research-agent/
 │   ├── state.py                 # AgentState TypedDict schema
 │   └── workflow.py              # LangGraph StateGraph definition
 ├── frontend/                    # Week 4 React app (empty for now)
+├── benchmarks/                  # Live-API benchmark harness + committed results
 ├── tests/
-│   └── test_agents.py           # Unit + integration tests
+│   ├── test_agents.py           # Unit + graph + API tests (Groq/Tavily faked)
+│   ├── test_benchmark.py        # Benchmark harness tests
+│   ├── helpers.py               # Fakes
+│   └── conftest.py              # Shared fixtures
 ├── .env                         # API keys (never commit)
 ├── .gitignore
 ├── claude.md                    # This file
@@ -141,7 +146,7 @@ TAVILY_API_KEY=tvly-...       # from app.tavily.com
 
 ### LLM Usage
 - Model: `llama-3.3-70b-versatile` (never hardcode model string — use constant `MODEL = "llama-3.3-70b-versatile"`)
-- Client: `groq.Groq(api_key=os.getenv("GROQ_API_KEY"))`
+- Client: `groq.Groq(api_key=os.getenv("GROQ_API_KEY"))`, built only inside `agents/llm.py` — agents call `chat()`
 - Prompts: structured with clear role/task/output-format sections
 - Temperature: 0.3 for Planner/Critic (deterministic), 0.7 for Writer (creative)
 - Max tokens: Planner 500, Search N/A, Writer 4000, Critic 500
@@ -231,8 +236,8 @@ Located in `~/.claude/skills/`:
 | Week 1 | Core agents + LangGraph graph | ✅ Complete |
 | Week 2 | Writer agent + report synthesis | ✅ Complete |
 | Week 3 | Critic agent + revision loop | ✅ Complete |
-| Week 4 | FastAPI backend + React frontend | 🔄 In Progress |
-| Week 4 | FastAPI backend + React frontend | 🔄 In Progress |
+| Week 4 | FastAPI backend + React frontend | ✅ Complete |
+| Week 5 | Telemetry, concurrent search, tests + CI, benchmarks | ✅ Complete |
 
 ---
 

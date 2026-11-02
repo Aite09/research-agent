@@ -10,23 +10,14 @@ Why this step?
   sector-specific impacts, etc.) gives the Writer much richer, structured material.
 """
 
-import os
 import json
 from typing import List
 
-from groq import Groq
+from agents.llm import chat
 from graph.state import AgentState
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MODEL = "llama-3.3-70b-versatile"
-
-
-def _build_client() -> Groq:
-    """Initialise Groq client from environment."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise EnvironmentError("GROQ_API_KEY not set in environment.")
-    return Groq(api_key=api_key)
 
 
 def _parse_queries(raw: str) -> List[str]:
@@ -92,8 +83,6 @@ def planner_node(state: AgentState) -> dict:
     print(f"[PLANNER] Starting — query: {query}")
 
     try:
-        client = _build_client()
-
         system_prompt = (
             "You are a research planning assistant. Your job is to decompose a broad "
             "research question into 3–5 precise, focused sub-queries. Each sub-query "
@@ -109,17 +98,14 @@ def planner_node(state: AgentState) -> dict:
 
         user_prompt = f"Research question: {query}"
 
-        response = client.chat.completions.create(
+        raw_output = chat(
+            agent="planner",
             model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=0.3,
             max_tokens=500,
         )
-
-        raw_output = response.choices[0].message.content or ""
         search_queries = _parse_queries(raw_output)
 
         print(f"[PLANNER] Done — generated {len(search_queries)} sub-queries:")

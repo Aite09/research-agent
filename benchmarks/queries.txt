@@ -1,0 +1,22 @@
+# One research question per line. Lines starting with # are ignored.
+# Deliberately spread across domains so latency/cost aren't tuned to one topic.
+What are the main trade-offs between retrieval-augmented generation and fine-tuning for domain-specific LLMs?
+How are solid-state batteries progressing toward commercial electric vehicles?
+What does current research say about the effectiveness of four-day work weeks?
+How is CRISPR gene editing being used in approved medical treatments?
+What are the security risks of prompt injection in LLM-powered agents and how are they mitigated?
+How have central bank interest rate changes affected housing affordability in Canada since 2022?
+What is the current state of small modular nuclear reactors?
+How do vector databases differ from traditional databases for similarity search?
+What evidence exists on the impact of remote work on employee productivity?
+How are microplastics affecting human health according to recent studies?
+What are the leading approaches to carbon capture and how cost-effective are they?
+How does WebAssembly compare to JavaScript for performance-critical web applications?
+What is known about the long-term effects of GLP-1 weight-loss drugs?
+How are large language models being evaluated for factual accuracy?
+What are the economic effects of minimum wage increases on small businesses?
+How is quantum computing expected to affect current encryption standards?
+What are the environmental costs of training and running large AI models?
+How are cities using congestion pricing and what results have they seen?
+What are the main causes of the global semiconductor supply chain disruptions?
+How effective are heat pumps in very cold climates?
