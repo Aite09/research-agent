@@ -9,17 +9,16 @@ Why a dedicated Writer agent?
   Writer's job is to act like a senior analyst: read all sources, identify
   patterns, resolve conflicts, and produce a coherent narrative report.
 
-Uses Groq API (llama-3.3-70b-versatile) for fast, high-quality synthesis.
+Uses the shared Groq model (agents.llm.MODEL) for synthesis.
 """
 
 from typing import List
 
-from agents.llm import chat
+from agents.llm import MODEL, chat
 
 from graph.state import AgentState, SearchResult
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL = "llama-3.3-70b-versatile"
 MAX_TOKENS = 4000
 TEMPERATURE = 0.7   # Higher than Planner — Writer benefits from fluency
 

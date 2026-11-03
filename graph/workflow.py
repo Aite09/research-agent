@@ -27,6 +27,27 @@ from agents.writer_agent import writer_node
 from agents.critic_agent import critic_node, route_after_critic
 
 
+def _continue_unless_error(next_node: str):
+    """
+    Build a router that stops the run when the previous node set status "error".
+
+    Without this, a Planner failure still ran Search and the Writer (an LLM
+    call with no research material) before the Critic finally gave up.
+
+    Args:
+        next_node: Node to run when the previous one succeeded.
+
+    Returns:
+        Routing function returning next_node or "end".
+    """
+
+    def _route(state: AgentState) -> str:
+        """Return "end" on error, else the next node name."""
+        return "end" if state.get("status") == "error" else next_node
+
+    return _route
+
+
 def build_graph() -> StateGraph:
     """
     Construct and compile the LangGraph StateGraph.
@@ -49,8 +70,10 @@ def build_graph() -> StateGraph:
 
     # ── Define edges ──────────────────────────────────────────────────────────
     graph.set_entry_point("planner")
-    graph.add_edge("planner", "search")
-    graph.add_edge("search", "writer")
+    # Planner/Search failures end the run; Search with zero results still
+    # continues (status "writing") so the Writer can report the gap.
+    graph.add_conditional_edges("planner", _continue_unless_error("search"), {"search": "search", "end": END})
+    graph.add_conditional_edges("search", _continue_unless_error("writer"), {"writer": "writer", "end": END})
     graph.add_edge("writer", "critic")
 
     # Conditional routing after critic:

@@ -7,7 +7,7 @@
 
 ## Project Purpose
 
-User submits research query → 4 specialized LLM agents (Groq, Llama 3.3 70B) collaborate autonomously → structured, self-corrected markdown report with sources and quality score.
+User submits research query → 4 specialized LLM agents (Groq, gpt-oss-120b) collaborate autonomously → structured, self-corrected markdown report with sources and quality score.
 
 ---
 
@@ -41,7 +41,7 @@ START → planner → search → writer → critic → END
 |-------|-----------|---------------|
 | Language | Python | 3.11+ |
 | Agent Orchestration | LangGraph | Latest stable |
-| LLM | Groq API (OpenAI-compatible) | `llama-3.3-70b-versatile` |
+| LLM | Groq API (OpenAI-compatible) | `openai/gpt-oss-120b` via `GROQ_MODEL` (Llama 3.3 70B was retired by Groq) |
 | Web Search | Tavily API | via `tavily-python` |
 | Backend (Week 4) | FastAPI | REST + WebSocket |
 | Frontend (Week 4) | React + Tailwind CSS | Vite-based |
@@ -145,7 +145,7 @@ TAVILY_API_KEY=tvly-...       # from app.tavily.com
 - No `eval()` or `exec()` usage
 
 ### LLM Usage
-- Model: `llama-3.3-70b-versatile` (never hardcode model string — use constant `MODEL = "llama-3.3-70b-versatile"`)
+- Model: single constant `MODEL` in `agents/llm.py` (env `GROQ_MODEL`, default `openai/gpt-oss-120b`) — never hardcode the model string in agents
 - Client: `groq.Groq(api_key=os.getenv("GROQ_API_KEY"))`, built only inside `agents/llm.py` — agents call `chat()`
 - Prompts: structured with clear role/task/output-format sections
 - Temperature: 0.3 for Planner/Critic (deterministic), 0.7 for Writer (creative)
@@ -270,7 +270,7 @@ When working on this project:
 2. Apply `senior-fullstack` + `senior-backend` principles
 3. Never produce incomplete code — use `full-output-enforcement` skill if needed
 4. Explain LangGraph decisions (beginner context)
-5. Default model constant: `MODEL = "llama-3.3-70b-versatile"`
+5. Model constant lives in `agents/llm.py` (`MODEL`, env `GROQ_MODEL`)
 6. Prefer editing existing files over creating new ones
 7. Flag any deviation from production standards in comments
 1

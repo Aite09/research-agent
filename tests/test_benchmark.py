@@ -56,7 +56,7 @@ def test_run_pipeline_once_aggregates_llm_records(
     assert row["llm_errors"] == 0
     assert row["prompt_tokens"] == 3000
     assert row["completion_tokens"] == 1500
-    assert row["cost_usd"] == pytest.approx(3 * 0.000985)
+    assert row["cost_usd"] == pytest.approx(3 * llm.estimate_cost_usd(llm.MODEL, 1000, 500))
     assert (row["writer_passes"], row["critic_passes"]) == (1, 1)
     assert row["total_s"] >= sum(row["node_s"].values()) - 0.01
 

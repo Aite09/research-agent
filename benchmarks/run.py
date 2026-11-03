@@ -25,7 +25,7 @@ Usage:
     OBSERVABILITY_URL=http://localhost:8000 python -m benchmarks.run --runs 10
 
 Quota notes (free tiers):
-    Groq llama-3.3-70b has per-minute token limits; a run with revisions can hit
+    Groq free-tier models have per-minute token limits; a run with revisions can hit
     them. Use --delay (seconds between runs) to stay under, and check the
     llm_errors column — rate-limited runs are recorded, not hidden.
     Tavily "advanced" search costs 2 credits per sub-query.
@@ -45,7 +45,7 @@ from typing import Any, List, Optional
 from dotenv import load_dotenv
 
 import agents.llm as llm
-from agents.planner_agent import MODEL, planner_node
+from agents.planner_agent import planner_node
 from agents.search_agent import DEFAULT_SEARCH_CONCURRENCY, search_node
 from graph.state import AgentState
 from graph.workflow import build_graph
@@ -384,11 +384,11 @@ def main() -> None:
         "mode": args.mode,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_revision": git_revision(),
-        "model": MODEL,
+        "model": llm.MODEL,
         "search_concurrency": args.search_concurrency,
         "delay_s": args.delay,
         "queries_file": str(args.queries),
-        "pricing_per_million_usd": llm.PRICING_PER_MILLION.get(MODEL),
+        "pricing_per_million_usd": llm.PRICING_PER_MILLION.get(llm.MODEL),
         "results": summarize(rows),
     }
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")

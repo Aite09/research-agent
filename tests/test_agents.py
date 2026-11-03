@@ -221,8 +221,8 @@ def test_route_after_critic_follows_status(status: str, route: str) -> None:
 
 # ── LLM wrapper ──────────────────────────────────────────────────────────────
 def test_estimate_cost_usd() -> None:
-    """List-price cost: 1000 in + 500 out on llama-3.3-70b = $0.000985; unknown model = $0."""
-    assert llm.estimate_cost_usd("llama-3.3-70b-versatile", 1000, 500) == pytest.approx(0.000985)
+    """List-price cost: 1000 in + 500 out on gpt-oss-120b = $0.000525; unknown model = $0."""
+    assert llm.estimate_cost_usd("openai/gpt-oss-120b", 1000, 500) == pytest.approx(0.000525)
     assert llm.estimate_cost_usd("some-other-model", 1000, 500) == 0.0
 
 
@@ -231,14 +231,14 @@ def test_chat_records_tokens_cost_latency(
 ) -> None:
     """A successful call returns text and emits one complete record."""
     monkeypatch.setattr(llm, "_build_client", lambda: fake_groq_client(content="answer"))
-    text = llm.chat("planner", "llama-3.3-70b-versatile", "sys", "user q", 0.3, 100)
+    text = llm.chat("planner", llm.MODEL, "sys", "user q", 0.3, 100)
 
     assert text == "answer"
     assert len(records) == 1
     rec = records[0]
     assert rec["status"] == "success"
     assert (rec["prompt_tokens"], rec["completion_tokens"]) == (1000, 500)
-    assert rec["cost_usd"] == pytest.approx(0.000985)
+    assert rec["cost_usd"] == pytest.approx(llm.estimate_cost_usd(llm.MODEL, 1000, 500))
     assert rec["latency_ms"] >= 0
     assert rec["agent"] == "planner"
 
@@ -249,7 +249,7 @@ def test_chat_failure_is_recorded_then_raised(
     """Failed calls are logged as errors and still raise so the agent can handle them."""
     monkeypatch.setattr(llm, "_build_client", lambda: fake_groq_client(exc=RuntimeError("429")))
     with pytest.raises(RuntimeError, match="429"):
-        llm.chat("writer", "llama-3.3-70b-versatile", "sys", "user", 0.7, 100)
+        llm.chat("writer", llm.MODEL, "sys", "user", 0.7, 100)
     assert records[0]["status"] == "error"
     assert records[0]["response"] is None
 
@@ -268,7 +268,7 @@ def test_chat_ships_log_matching_platform_schema(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(llm.httpx, "post", fake_post)
     monkeypatch.setattr(llm, "_build_client", lambda: fake_groq_client())
 
-    llm.chat("critic", "llama-3.3-70b-versatile", "SYSTEM PROMPT", "the user prompt", 0.3, 100)
+    llm.chat("critic", llm.MODEL, "SYSTEM PROMPT", "the user prompt", 0.3, 100)
 
     assert len(posted) == 1
     assert posted[0]["url"] == "http://obs.local:8000/logs"
@@ -293,7 +293,7 @@ def test_chat_survives_observability_outage(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(llm.httpx, "post", refuse)
     monkeypatch.setattr(llm, "_build_client", lambda: fake_groq_client(content="still works"))
 
-    assert llm.chat("planner", "llama-3.3-70b-versatile", "s", "u", 0.3, 10) == "still works"
+    assert llm.chat("planner", llm.MODEL, "s", "u", 0.3, 10) == "still works"
 
 
 def test_chat_without_observability_url_sends_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,7 +301,37 @@ def test_chat_without_observability_url_sends_nothing(monkeypatch: pytest.Monkey
     monkeypatch.setattr(llm, "_shipper", SyncExecutor())
     monkeypatch.setattr(llm.httpx, "post", lambda *a, **k: pytest.fail("unexpected POST"))
     monkeypatch.setattr(llm, "_build_client", lambda: fake_groq_client())
-    llm.chat("planner", "llama-3.3-70b-versatile", "s", "u", 0.3, 10)
+    llm.chat("planner", llm.MODEL, "s", "u", 0.3, 10)
+
+
+@pytest.mark.parametrize(
+    ("model", "expect_reasoning"),
+    [("openai/gpt-oss-120b", True), ("openai/gpt-oss-20b", True), ("qwen/qwen3.8-27b", False)],
+)
+def test_chat_sets_low_reasoning_only_for_gpt_oss(
+    monkeypatch: pytest.MonkeyPatch, model: str, expect_reasoning: bool
+) -> None:
+    """gpt-oss calls get reasoning_effort=low and no reasoning text; other models get neither."""
+    sent: List[dict] = []
+
+    def create(**kwargs: Any) -> SimpleNamespace:
+        """Capture request kwargs and return a minimal completion."""
+        sent.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(llm, "_build_client", lambda: client)
+    llm.chat("planner", model, "s", "u", 0.3, 10)
+
+    if expect_reasoning:
+        assert sent[0]["reasoning_effort"] == "low"
+        assert sent[0]["include_reasoning"] is False
+    else:
+        assert "reasoning_effort" not in sent[0]
+        assert "include_reasoning" not in sent[0]
 
 
 # ── Full graph (mocked) ──────────────────────────────────────────────────────
@@ -357,6 +387,45 @@ def test_graph_critic_error_ends_run(
 
     assert final["status"] == "error"
     assert fake.count("writer") == 1
+
+
+def test_graph_planner_error_ends_before_search(
+    monkeypatch: pytest.MonkeyPatch,
+    install_llm: Callable[[FakeLLM], FakeLLM],
+    install_tavily: Callable[[FakeTavily], FakeTavily],
+) -> None:
+    """A Planner failure ends the run — no Tavily search, no Writer LLM call on empty research."""
+    fake = install_llm(FakeLLM(critic_scores=[8]))
+    tavily = install_tavily(FakeTavily())
+
+    def planner_down(**_: Any) -> str:
+        """Simulate the model being unavailable."""
+        raise RuntimeError("404 model_not_found")
+
+    monkeypatch.setattr(planner_agent, "chat", planner_down)
+    final = build_graph().invoke(make_state())
+
+    assert final["status"] == "error"
+    assert "model_not_found" in final["error"]
+    assert fake.count("writer") == 0
+    assert tavily.max_in_flight == 0
+
+
+def test_graph_search_error_ends_before_writer(
+    monkeypatch: pytest.MonkeyPatch, install_llm: Callable[[FakeLLM], FakeLLM]
+) -> None:
+    """A Search setup failure (e.g. missing Tavily key) ends the run before the Writer."""
+    fake = install_llm(FakeLLM(critic_scores=[8]))
+
+    def no_key() -> None:
+        """Simulate a missing TAVILY_API_KEY."""
+        raise EnvironmentError("TAVILY_API_KEY not set in environment.")
+
+    monkeypatch.setattr(search_agent, "_build_client", no_key)
+    final = build_graph().invoke(make_state())
+
+    assert final["status"] == "error"
+    assert fake.count("writer") == 0
 
 
 # ── API ──────────────────────────────────────────────────────────────────────

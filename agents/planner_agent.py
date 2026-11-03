@@ -13,11 +13,10 @@ Why this step?
 import json
 from typing import List
 
-from agents.llm import chat
+from agents.llm import MODEL, chat
 from graph.state import AgentState
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL = "llama-3.3-70b-versatile"
 
 
 def _parse_queries(raw: str) -> List[str]:

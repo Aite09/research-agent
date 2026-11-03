@@ -19,12 +19,11 @@ revision_count counts revisions actually requested, so at most 2 rewrites run.
 
 import re
 
-from agents.llm import chat
+from agents.llm import MODEL, chat
 
 from graph.state import AgentState
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL = "llama-3.3-70b-versatile"
 MAX_TOKENS = 500
 TEMPERATURE = 0.3    # Low — Critic must be consistent and deterministic
 QUALITY_THRESHOLD = 7.0

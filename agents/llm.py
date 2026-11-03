@@ -30,11 +30,24 @@ from groq import Groq
 # ── Constants ────────────────────────────────────────────────────────────────
 PROVIDER = "groq"
 
-# USD per 1M tokens (input, output) — Groq on-demand list price, checked 2026-11.
-# Free-tier keys are not billed; cost_usd is the list-price equivalent so runs
-# can be compared and budgeted. Update if groq.com/pricing changes.
+# Single source of truth for the model every agent uses. Groq retired
+# llama-3.3-70b-versatile (404 model_not_found, 2026-11); reading GROQ_MODEL
+# makes the next retirement a config change instead of a code change.
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+# gpt-oss models reason before answering. "low" keeps latency and tokens down —
+# planning, writing and critique don't need long chains of thought — and the
+# reasoning text (returned in a separate field) is dropped since nothing reads it.
+# Reasoning tokens still count toward max_tokens and completion_tokens.
+REASONING_EFFORT = "low"
+REASONING_MODEL_PREFIX = "openai/gpt-oss"
+
+# USD per 1M tokens (input, output). gpt-oss-120b uses Groq's launch price
+# ($0.15 / $0.75, groq.com/blog/day-zero-support-for-openai-open-models); some
+# trackers now list $0.60 output, so this errs high. Free-tier keys are not
+# billed — cost_usd is the list-price equivalent so runs can be compared.
 PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
-    "llama-3.3-70b-versatile": (0.59, 0.79),
+    "openai/gpt-oss-120b": (0.15, 0.75),
 }
 
 OBSERVABILITY_TIMEOUT_S = 2.0
@@ -59,6 +72,7 @@ class LLMCallRecord(TypedDict):
 Listener = Callable[[LLMCallRecord], None]
 
 _listeners: List[Listener] = []
+_unpriced_warned: set[str] = set()
 # Two workers is plenty: posts are tiny and only overlap during concurrent API runs.
 _shipper = ThreadPoolExecutor(max_workers=2, thread_name_prefix="obs-shipper")
 
@@ -199,6 +213,13 @@ def chat(
         Any Groq/network exception, after the failed call has been recorded.
         Agents catch this and set state["error"] as before.
     """
+    reasoning_kwargs: dict[str, object] = {}
+    if model.startswith(REASONING_MODEL_PREFIX):
+        reasoning_kwargs = {"reasoning_effort": REASONING_EFFORT, "include_reasoning": False}
+    if model not in PRICING_PER_MILLION and model not in _unpriced_warned:
+        _unpriced_warned.add(model)
+        print(f"[LLM] WARNING — no list price for '{model}'; cost_usd will be 0.0")
+
     start = time.perf_counter()
     try:
         client = _build_client()
@@ -210,6 +231,7 @@ def chat(
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            **reasoning_kwargs,
         )
     except Exception as exc:
         _emit(LLMCallRecord(

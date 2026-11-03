@@ -57,7 +57,7 @@ Every LLM call goes through one wrapper (`agents/llm.py`) that measures latency,
 | Layer | Technology |
 |-------|-----------|
 | Agent Orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) |
-| LLM | [Groq](https://console.groq.com) — `llama-3.3-70b-versatile` |
+| LLM | [Groq](https://console.groq.com) — `openai/gpt-oss-120b` (set `GROQ_MODEL` to change) |
 | Web Search | [Tavily](https://app.tavily.com) |
 | Backend | FastAPI + WebSocket |
 | Frontend | React 18 + Vite + TypeScript + Tailwind CSS |
@@ -203,6 +203,7 @@ the report (CLI summary, REST response, WebSocket `complete` event).
 |----------|-------------|--------------|
 | `GROQ_API_KEY` | LLM inference | [console.groq.com](https://console.groq.com) |
 | `TAVILY_API_KEY` | Web search | [app.tavily.com](https://app.tavily.com) |
+| `GROQ_MODEL` | Groq model for all agents (default `openai/gpt-oss-120b`) | optional |
 | `SEARCH_CONCURRENCY` | Max parallel Tavily requests (default `5`; `1` = sequential) | optional |
 | `OBSERVABILITY_URL` | Base URL of the LLM Observability Platform API, e.g. `http://localhost:8000` | optional |
 | `OBSERVABILITY_APP_ID` | `application_id` used in observability logs (default `research-agent`) | optional |
@@ -236,8 +237,8 @@ python -m benchmarks.run --mode search-ab --runs 10   # search stage: sequential
 ```
 
 - **Latency** is wall-clock per run; per-agent time comes from LangGraph stream updates.
-- **Cost** is tokens × Groq list price ($0.59 / $0.79 per 1M input/output tokens for
-  `llama-3.3-70b-versatile`). Free-tier keys are not billed — this is the equivalent paid cost.
+- **Cost** is tokens × Groq list price ($0.15 / $0.75 per 1M input/output tokens for
+  `openai/gpt-oss-120b`, launch price — errs high). Free-tier keys are not billed — this is the equivalent paid cost.
 - **Search A/B** plans once, then times both modes on identical sub-queries, alternating
   which runs first so Tavily-side caching can't bias the result.
 - Rate-limited or failed runs are kept in the results and reported as `error_rate`;
