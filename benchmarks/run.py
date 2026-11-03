@@ -13,26 +13,32 @@ Two modes:
 
   search-ab
       A/B test of the Search stage only: sequential (SEARCH_CONCURRENCY=1) vs
-      concurrent search on the *same* planner sub-queries. The order alternates
-      per question so Tavily-side caching can't favour one side.
+      concurrent. Each question is planned, then searched ONCE in one mode
+      (alternating), so every timing is a cold Tavily request. An earlier
+      design timed both modes on the same sub-queries; Tavily served the
+      second side from cache (0.2–0.5 s vs 3–12 s cold), which made the
+      comparison meaningless. Use --start to pick questions not searched recently.
 
 Results go to benchmarks/results/<timestamp>_<mode>.jsonl (one line per run)
 plus <timestamp>_<mode>_summary.json — commit them as evidence.
 
 Usage:
     python -m benchmarks.run --runs 5
-    python -m benchmarks.run --mode search-ab --runs 10
+    python -m benchmarks.run --mode search-ab --runs 10 --start 10
     OBSERVABILITY_URL=http://localhost:8000 python -m benchmarks.run --runs 10
 
 Quota notes (free tiers):
-    Groq free-tier models have per-minute token limits; a run with revisions can hit
-    them. Use --delay (seconds between runs) to stay under, and check the
-    llm_errors column — rate-limited runs are recorded, not hidden.
+    Groq free-tier models have per-minute token limits. The Groq SDK retries
+    429s itself after a backoff, so a rate-limited call looks like a slow call,
+    not an error. Each run therefore records rate_limit_retries and
+    retry_wait_s (parsed from the SDK's retry log), and the summary reports
+    latency both with and without that wait.
     Tavily "advanced" search costs 2 credits per sub-query.
 """
 
 import argparse
 import json
+import logging
 import math
 import os
 import statistics
@@ -55,16 +61,35 @@ BENCH_DIR = Path(__file__).resolve().parent
 DEFAULT_QUERIES = BENCH_DIR / "queries.txt"
 RESULTS_DIR = BENCH_DIR / "results"
 NODES = ("planner", "search", "writer", "critic")
+GROQ_RETRY_LOGGER = "groq._base_client"   # logs "Retrying request to %s in %f seconds"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-def load_queries(path: Path, runs: int) -> List[str]:
+class RetryCounter(logging.Handler):
+    """Counts Groq SDK retries (429 rate limits, 5xx) and the backoff time they add."""
+
+    def __init__(self) -> None:
+        """Start with zero retries."""
+        super().__init__(level=logging.INFO)
+        self.retries = 0
+        self.wait_s = 0.0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Parse the SDK's retry log line; ignore everything else."""
+        args = record.args if isinstance(record.args, tuple) else ()
+        if isinstance(record.msg, str) and record.msg.startswith("Retrying request") and len(args) >= 2:
+            self.retries += 1
+            self.wait_s += float(args[1])
+
+
+def load_queries(path: Path, runs: int, start: int = 0) -> List[str]:
     """
     Read questions from a file, cycling if more runs than questions are requested.
 
     Args:
-        path: Text file, one question per line, '#' comments allowed.
-        runs: Number of questions to return.
+        path:  Text file, one question per line, '#' comments allowed.
+        runs:  Number of questions to return.
+        start: Index of the first question to use.
 
     Returns:
         List of `runs` questions.
@@ -73,7 +98,7 @@ def load_queries(path: Path, runs: int) -> List[str]:
     questions = [ln for ln in lines if ln and not ln.startswith("#")]
     if not questions:
         raise ValueError(f"No questions found in {path}")
-    return [questions[i % len(questions)] for i in range(runs)]
+    return [questions[(start + i) % len(questions)] for i in range(runs)]
 
 
 def initial_state(query: str) -> AgentState:
@@ -144,6 +169,11 @@ def run_pipeline_once(query: str) -> dict[str, Any]:
     """
     calls: List[llm.LLMCallRecord] = []
     llm.add_listener(calls.append)
+    retry_logger = logging.getLogger(GROQ_RETRY_LOGGER)
+    previous_level = retry_logger.level
+    retries = RetryCounter()
+    retry_logger.setLevel(logging.INFO)
+    retry_logger.addHandler(retries)
 
     graph = build_graph()
     state: dict[str, Any] = dict(initial_state(query))
@@ -163,6 +193,8 @@ def run_pipeline_once(query: str) -> dict[str, Any]:
         state["status"], state["error"] = "error", f"graph raised: {exc}"
     finally:
         llm.remove_listener(calls.append)
+        retry_logger.removeHandler(retries)
+        retry_logger.setLevel(previous_level)
     total_s = time.perf_counter() - start
 
     report = state.get("report", "")
@@ -186,6 +218,8 @@ def run_pipeline_once(query: str) -> dict[str, Any]:
         "completion_tokens": sum(c["completion_tokens"] for c in calls),
         "cost_usd": round(sum(c["cost_usd"] for c in calls), 6),
         "llm_latency_s": round(sum(c["latency_ms"] for c in calls) / 1000, 3),
+        "rate_limit_retries": retries.retries,
+        "retry_wait_s": round(retries.wait_s, 3),
     }
 
 
@@ -202,6 +236,8 @@ def summarize_pipeline(rows: List[dict[str, Any]]) -> dict[str, Any]:
     """
     ok = [r for r in rows if r["status"] == "done"]
     totals = [r["total_s"] for r in ok]
+    # Same runs with SDK backoff subtracted: what the pipeline costs when not throttled.
+    unthrottled = [r["total_s"] - r["retry_wait_s"] for r in ok]
     summary: dict[str, Any] = {
         "runs": len(rows),
         "successful_runs": len(ok),
@@ -212,6 +248,15 @@ def summarize_pipeline(rows: List[dict[str, Any]]) -> dict[str, Any]:
             "mean": rounded(statistics.fmean(totals)) if totals else None,
             "min": rounded(min(totals)) if totals else None,
             "max": rounded(max(totals)) if totals else None,
+        },
+        "latency_excluding_retry_wait_s": {
+            "p50": rounded(percentile(unthrottled, 50)),
+            "p95": rounded(percentile(unthrottled, 95)),
+        },
+        "rate_limits": {
+            "runs_with_retries": sum(1 for r in ok if r["rate_limit_retries"]),
+            "retries_total": sum(r["rate_limit_retries"] for r in ok),
+            "retry_wait_s_mean": rounded(statistics.fmean(r["retry_wait_s"] for r in ok)) if ok else None,
         },
         "stage_p50_s": {
             name: rounded(percentile([r["node_s"][name] for r in ok], 50)) for name in NODES
@@ -259,12 +304,15 @@ def timed_search(sub_queries: List[str], concurrency: int) -> tuple[float, int]:
 
 def run_search_ab_once(query: str, index: int, concurrency: int) -> dict[str, Any]:
     """
-    Plan once, then time sequential vs concurrent search on identical sub-queries.
+    Plan, then time ONE cold search in the mode assigned to this run.
+
+    Modes alternate (even index → sequential, odd → concurrent) so both sides
+    get a similar mix of questions, and no sub-query is searched twice.
 
     Args:
         query:       Research question.
-        index:       Run index; even → sequential first, odd → concurrent first.
-        concurrency: Concurrent side's SEARCH_CONCURRENCY.
+        index:       Run index, picks the mode.
+        concurrency: SEARCH_CONCURRENCY for the concurrent side.
 
     Returns:
         One result row.
@@ -274,51 +322,45 @@ def run_search_ab_once(query: str, index: int, concurrency: int) -> dict[str, An
     if planned.get("status") == "error" or not sub_queries:
         return {"query": query, "status": "error", "error": planned.get("error", "no sub-queries")}
 
-    order = [1, concurrency] if index % 2 == 0 else [concurrency, 1]
-    timings: dict[int, tuple[float, int]] = {}
-    for c in order:
-        timings[c] = timed_search(sub_queries, c)
-
-    seq_s, seq_n = timings[1]
-    conc_s, conc_n = timings[concurrency]
+    workers = 1 if index % 2 == 0 else concurrency
+    seconds, result_count = timed_search(sub_queries, workers)
     return {
         "query": query,
         "status": "done",
         "error": "",
+        "mode": "sequential" if workers == 1 else "concurrent",
+        "concurrency": workers,
         "sub_queries": len(sub_queries),
-        "first": "sequential" if order[0] == 1 else "concurrent",
-        "sequential_s": round(seq_s, 3),
-        "concurrent_s": round(conc_s, 3),
-        "sequential_results": seq_n,
-        "concurrent_results": conc_n,
-        "speedup": round(seq_s / conc_s, 2) if conc_s > 0 else None,
+        "search_s": round(seconds, 3),
+        "results": result_count,
     }
 
 
 def summarize_search_ab(rows: List[dict[str, Any]]) -> dict[str, Any]:
     """
-    Aggregate search A/B rows.
+    Compare cold search latency between the two modes.
 
     Args:
         rows: Output of run_search_ab_once.
 
     Returns:
-        Summary dict including p50 reduction (%) of search-stage latency.
+        Summary with per-mode p50/p95, sample sizes and p50 reduction (%).
     """
     ok = [r for r in rows if r["status"] == "done"]
-    seq = [r["sequential_s"] for r in ok]
-    conc = [r["concurrent_s"] for r in ok]
+    seq = [r["search_s"] for r in ok if r["mode"] == "sequential"]
+    conc = [r["search_s"] for r in ok if r["mode"] == "concurrent"]
     seq_p50, conc_p50 = percentile(seq, 50), percentile(conc, 50)
-    reduction = None
-    if seq_p50 and conc_p50 is not None:
+    reduction = speedup = None
+    if seq_p50 and conc_p50:
         reduction = round(100 * (1 - conc_p50 / seq_p50), 1)
+        speedup = round(seq_p50 / conc_p50, 2)
     return {
         "runs": len(rows),
         "successful_runs": len(ok),
-        "sequential_s": {"p50": rounded(seq_p50), "p95": rounded(percentile(seq, 95))},
-        "concurrent_s": {"p50": rounded(conc_p50), "p95": rounded(percentile(conc, 95))},
+        "sequential_s": {"n": len(seq), "p50": rounded(seq_p50), "p95": rounded(percentile(seq, 95))},
+        "concurrent_s": {"n": len(conc), "p50": rounded(conc_p50), "p95": rounded(percentile(conc, 95))},
         "p50_reduction_pct": reduction,
-        "speedup_median": rounded(percentile([r["speedup"] for r in ok if r["speedup"]], 50), 2),
+        "p50_speedup": speedup,
         "sub_queries_mean": rounded(statistics.fmean(r["sub_queries"] for r in ok), 2) if ok else None,
     }
 
@@ -330,6 +372,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("pipeline", "search-ab"), default="pipeline")
     parser.add_argument("--runs", type=int, default=5, help="Number of questions to run (default 5)")
     parser.add_argument("--queries", type=Path, default=DEFAULT_QUERIES, help="Question file")
+    parser.add_argument("--start", type=int, default=0, help="Index of the first question to use")
     parser.add_argument(
         "--search-concurrency", type=int, default=DEFAULT_SEARCH_CONCURRENCY,
         help="SEARCH_CONCURRENCY for pipeline runs / the concurrent side of search-ab",
@@ -349,7 +392,7 @@ def main() -> None:
     if args.mode == "search-ab" and args.search_concurrency == 1:
         raise SystemExit("search-ab compares against concurrency 1; pass --search-concurrency > 1")
 
-    queries = load_queries(args.queries, args.runs)
+    queries = load_queries(args.queries, args.runs, args.start)
     os.environ["SEARCH_CONCURRENCY"] = str(args.search_concurrency)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -367,12 +410,13 @@ def main() -> None:
                 row = run_pipeline_once(query)
                 print(f"[BENCH]   {row['status']} in {row['total_s']}s | "
                       f"score {row['quality_score']} | revisions {row['revision_count']} | "
-                      f"${row['cost_usd']} | llm_errors {row['llm_errors']}")
+                      f"${row['cost_usd']} | llm_errors {row['llm_errors']} | "
+                      f"retries {row['rate_limit_retries']} ({row['retry_wait_s']}s)")
             else:
                 row = run_search_ab_once(query, i, args.search_concurrency)
                 if row["status"] == "done":
-                    print(f"[BENCH]   sequential {row['sequential_s']}s vs "
-                          f"concurrent {row['concurrent_s']}s (x{row['speedup']})")
+                    print(f"[BENCH]   {row['mode']} (x{row['concurrency']}): "
+                          f"{row['search_s']}s for {row['sub_queries']} sub-queries")
                 else:
                     print(f"[BENCH]   error: {row['error']}")
             rows.append(row)
@@ -388,6 +432,7 @@ def main() -> None:
         "search_concurrency": args.search_concurrency,
         "delay_s": args.delay,
         "queries_file": str(args.queries),
+        "queries_start": args.start,
         "pricing_per_million_usd": llm.PRICING_PER_MILLION.get(llm.MODEL),
         "results": summarize(rows),
     }

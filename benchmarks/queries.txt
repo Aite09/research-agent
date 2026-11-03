@@ -20,3 +20,13 @@ What are the environmental costs of training and running large AI models?
 How are cities using congestion pricing and what results have they seen?
 What are the main causes of the global semiconductor supply chain disruptions?
 How effective are heat pumps in very cold climates?
+What are the most effective strategies for reducing hospital readmission rates?
+How do transformer models handle long-context inputs and what are the current limits?
+What is the evidence on universal basic income pilot programs?
+How is precision agriculture changing crop yields and water use?
+What are the main challenges in scaling green hydrogen production?
+How are deepfake detection methods evolving and how reliable are they?
+What does research show about the effect of social media use on teenage mental health?
+How do different countries regulate autonomous vehicles?
+What are the trade-offs between monolithic and microservice architectures at scale?
+How is satellite internet changing connectivity in rural areas?

@@ -91,7 +91,7 @@ research-agent/
 │       └── types.ts          # TypeScript types
 ├── benchmarks/
 │   ├── run.py               # Live-API benchmark (pipeline + search A/B)
-│   ├── queries.txt          # 20 benchmark questions across domains
+│   ├── queries.txt          # 30 benchmark questions across domains
 │   └── results/             # Raw JSONL + summary JSON from each run
 ├── tests/
 │   ├── test_agents.py       # Agent, graph, LLM-wrapper and WebSocket tests
