@@ -232,17 +232,51 @@ to `benchmarks/results/` (raw JSONL + summary JSON, tagged with the git commit),
 so any number quoted about this project can be traced to a file.
 
 ```bash
-python -m benchmarks.run --runs 5                     # full pipeline: p50/p95 latency, tokens, cost, score
-python -m benchmarks.run --mode search-ab --runs 10   # search stage: sequential vs concurrent, same sub-queries
+python -m benchmarks.run --runs 5 --start 20                    # full pipeline: latency, tokens, cost, score
+python -m benchmarks.run --mode search-ab --runs 10 --start 10  # search stage: sequential vs concurrent
 ```
 
 - **Latency** is wall-clock per run; per-agent time comes from LangGraph stream updates.
+- **Rate limits:** the Groq SDK retries 429s after a backoff, so throttling looks like
+  latency, not an error. Each run records SDK retries and their wait (parsed from the
+  SDK's retry log); the summary reports latency with and without that wait.
 - **Cost** is tokens × Groq list price ($0.15 / $0.75 per 1M input/output tokens for
   `openai/gpt-oss-120b`, launch price — errs high). Free-tier keys are not billed — this is the equivalent paid cost.
-- **Search A/B** plans once, then times both modes on identical sub-queries, alternating
-  which runs first so Tavily-side caching can't bias the result.
-- Rate-limited or failed runs are kept in the results and reported as `error_rate`;
-  use `--delay` to stay under free-tier per-minute limits.
+- **Search A/B** searches each question once, in one mode (alternating), so every timing
+  is a cold Tavily request. Timing both modes on the same sub-queries doesn't work:
+  Tavily serves the repeat from cache (0.2–0.5 s vs 3–12 s cold).
+- Use `--start` to pick questions not searched recently, for the same cache reason.
+
+### Measured results (2026-11-03)
+
+**Search stage — sequential vs concurrent** · cold requests, 4 sub-queries each, n = 5 per mode
+([summary](benchmarks/results/20261103T002110Z_search-ab_summary.json))
+
+| Mode | p50 | p95 |
+|------|-----|-----|
+| Sequential (`SEARCH_CONCURRENCY=1`) | 11.68 s | 12.84 s |
+| Concurrent (5 workers) | 4.20 s | 4.67 s |
+
+Concurrent search cut search-stage p50 latency by **64% (2.78×)**.
+
+**Full pipeline** · `openai/gpt-oss-120b` on the Groq free tier, n = 5, commit `3cf4f24`
+([summary](benchmarks/results/20261103T001513Z_pipeline_summary.json))
+
+| Metric | Value |
+|--------|-------|
+| Successful runs | 5 / 5 |
+| End-to-end p50 (wall clock) | 25.3 s |
+| End-to-end p50 excluding rate-limit backoff | 9.7 s (p95 16.1 s) |
+| Runs throttled by free-tier limits | 4 / 5 — 18 SDK retries, 36.6 s mean wait per run |
+| List-price cost per run | p50 $0.0023 · mean $0.0031 |
+| Tokens per run (mean) | 8,760 in · 2,372 out across 3.8 LLM calls |
+| First draft accepted by critic | 4 / 5 |
+| Sources cited per report (mean) | 11.6 |
+
+Notes: with n = 5, p95 is effectively the worst run — treat these as indicative. The one
+unthrottled run finished in 7.2 s end-to-end. In run 3 the critic's score could not be
+parsed; the 5.0 fallback caused two extra revisions (146 s, 129 s of it rate-limit wait).
+That parser was fixed afterwards (`eaa1047`), so these results include the bug.
 
 ---
 

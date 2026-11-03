@@ -1,0 +1,31 @@
+{
+  "mode": "search-ab",
+  "generated_at": "2026-11-03T00:23:25.914699+00:00",
+  "git_revision": "3cf4f24+dirty",
+  "model": "openai/gpt-oss-120b",
+  "search_concurrency": 5,
+  "delay_s": 5.0,
+  "queries_file": "/Users/aitezazuddin/research-agent/benchmarks/queries.txt",
+  "queries_start": 10,
+  "pricing_per_million_usd": [
+    0.15,
+    0.75
+  ],
+  "results": {
+    "runs": 10,
+    "successful_runs": 10,
+    "sequential_s": {
+      "n": 5,
+      "p50": 11.676,
+      "p95": 12.844
+    },
+    "concurrent_s": {
+      "n": 5,
+      "p50": 4.203,
+      "p95": 4.669
+    },
+    "p50_reduction_pct": 64.0,
+    "p50_speedup": 2.78,
+    "sub_queries_mean": 4.0
+  }
+}
