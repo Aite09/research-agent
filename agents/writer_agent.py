@@ -9,28 +9,18 @@ Why a dedicated Writer agent?
   Writer's job is to act like a senior analyst: read all sources, identify
   patterns, resolve conflicts, and produce a coherent narrative report.
 
-Uses Groq API (llama-3.3-70b-versatile) for fast, high-quality synthesis.
+Uses the shared Groq model (agents.llm.MODEL) for synthesis.
 """
 
-import os
 from typing import List
 
-from groq import Groq
+from agents.llm import MODEL, chat
 
 from graph.state import AgentState, SearchResult
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL = "llama-3.3-70b-versatile"
 MAX_TOKENS = 4000
 TEMPERATURE = 0.7   # Higher than Planner — Writer benefits from fluency
-
-
-def _build_client() -> Groq:
-    """Initialise Groq client from environment."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise EnvironmentError("GROQ_API_KEY not set in environment.")
-    return Groq(api_key=api_key)
 
 
 def _format_search_results(results: List[SearchResult]) -> str:
@@ -122,8 +112,6 @@ def writer_node(state: AgentState) -> dict:
     print(f"[WRITER] Sources available: {len(search_results)} | Revision: {revision_count}")
 
     try:
-        client = _build_client()
-
         context = _format_search_results(search_results)
         sources_md = _build_sources_list(search_results)
 
@@ -168,17 +156,14 @@ def writer_node(state: AgentState) -> dict:
             f"{revision_instruction}"
         )
 
-        response = client.chat.completions.create(
+        report_body = chat(
+            agent="writer",
             model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
         )
-
-        report_body = response.choices[0].message.content or ""
 
         # Append sources section to the report
         full_report = (

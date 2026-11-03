@@ -1,6 +1,5 @@
 # Core agent dependencies
 groq>=0.9.0             # Groq API (llama-3.3-70b-versatile)
-openai>=1.40.0          # Keep for OpenAI-compatible fallback
 langgraph>=0.2.0        # Agent orchestration
 tavily-python>=0.5.0    # Web search
 python-dotenv>=1.0.0    # .env loading

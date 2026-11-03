@@ -2,8 +2,9 @@
 agents/search_agent.py
 
 Search Agent — takes the sub-queries from the Planner and uses Tavily to
-fetch real web results for each one. Results are truncated to 1500 chars
-each to keep LLM context manageable.
+fetch real web results for each one. Sub-queries run concurrently on a thread
+pool (SEARCH_CONCURRENCY, default 5) since each Tavily call is network-bound.
+Results are truncated to 1500 chars each to keep LLM context manageable.
 
 Why Tavily?
   Tavily is purpose-built for AI agents — it returns cleaned, readable page
@@ -12,6 +13,7 @@ Why Tavily?
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from tavily import TavilyClient
@@ -20,6 +22,7 @@ from graph.state import AgentState, SearchResult
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_RESULTS_PER_QUERY = 3    # Tavily results per sub-query
 MAX_CONTENT_CHARS = 1500     # Truncate content to keep LLM context lean
+DEFAULT_SEARCH_CONCURRENCY = 5
 
 
 def _build_client() -> TavilyClient:
@@ -28,6 +31,22 @@ def _build_client() -> TavilyClient:
     if not api_key:
         raise EnvironmentError("TAVILY_API_KEY not set in environment.")
     return TavilyClient(api_key=api_key)
+
+
+def _search_concurrency() -> int:
+    """
+    Read the max number of parallel Tavily requests from SEARCH_CONCURRENCY.
+
+    Read per call (not at import) so benchmarks/run.py can compare sequential
+    (1) against concurrent search inside one process.
+
+    Returns:
+        Worker count >= 1; falls back to DEFAULT_SEARCH_CONCURRENCY if unset or invalid.
+    """
+    try:
+        return max(1, int(os.getenv("SEARCH_CONCURRENCY", DEFAULT_SEARCH_CONCURRENCY)))
+    except ValueError:
+        return DEFAULT_SEARCH_CONCURRENCY
 
 
 def _sanitize_content(content: str) -> str:
@@ -122,11 +141,17 @@ def search_node(state: AgentState) -> dict:
         client = _build_client()
         all_results: List[SearchResult] = []
 
-        for i, query in enumerate(search_queries, 1):
-            print(f"[SEARCH] Searching {i}/{len(search_queries)}: '{query}'")
-            results = _search_single_query(client, query)
+        workers = min(_search_concurrency(), len(search_queries))
+        print(f"[SEARCH] Running {len(search_queries)} queries, concurrency={workers}")
+
+        # map() returns results in input order, so output stays grouped by
+        # sub-query exactly as the sequential loop produced it.
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            per_query = list(pool.map(lambda q: _search_single_query(client, q), search_queries))
+
+        for query, results in zip(search_queries, per_query):
             all_results.extend(results)
-            print(f"[SEARCH]   → {len(results)} results returned")
+            print(f"[SEARCH]   '{query}' → {len(results)} results")
 
         total = len(all_results)
         print(f"[SEARCH] Done — {total} total results collected across {len(search_queries)} queries")

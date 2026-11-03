@@ -1,0 +1,10 @@
+{"query": "What are the leading approaches to carbon capture and how cost-effective are they?", "status": "done", "error": "", "mode": "sequential", "concurrency": 1, "sub_queries": 4, "search_s": 12.905, "results": 12}
+{"query": "How does WebAssembly compare to JavaScript for performance-critical web applications?", "status": "done", "error": "", "mode": "concurrent", "concurrency": 5, "sub_queries": 4, "search_s": 4.203, "results": 12}
+{"query": "What is known about the long-term effects of GLP-1 weight-loss drugs?", "status": "done", "error": "", "mode": "sequential", "concurrency": 1, "sub_queries": 4, "search_s": 11.676, "results": 12}
+{"query": "How are large language models being evaluated for factual accuracy?", "status": "done", "error": "", "mode": "concurrent", "concurrency": 5, "sub_queries": 4, "search_s": 4.69, "results": 12}
+{"query": "What are the economic effects of minimum wage increases on small businesses?", "status": "done", "error": "", "mode": "sequential", "concurrency": 1, "sub_queries": 4, "search_s": 11.357, "results": 12}
+{"query": "How is quantum computing expected to affect current encryption standards?", "status": "done", "error": "", "mode": "concurrent", "concurrency": 5, "sub_queries": 4, "search_s": 4.583, "results": 12}
+{"query": "What are the environmental costs of training and running large AI models?", "status": "done", "error": "", "mode": "sequential", "concurrency": 1, "sub_queries": 4, "search_s": 12.598, "results": 12}
+{"query": "How are cities using congestion pricing and what results have they seen?", "status": "done", "error": "", "mode": "concurrent", "concurrency": 5, "sub_queries": 4, "search_s": 4.149, "results": 12}
+{"query": "What are the main causes of the global semiconductor supply chain disruptions?", "status": "done", "error": "", "mode": "sequential", "concurrency": 1, "sub_queries": 4, "search_s": 11.661, "results": 12}
+{"query": "How effective are heat pumps in very cold climates?", "status": "done", "error": "", "mode": "concurrent", "concurrency": 5, "sub_queries": 4, "search_s": 3.991, "results": 12}
