@@ -179,6 +179,10 @@ def test_writer_node_appends_sources(install_llm: Callable[[FakeLLM], FakeLLM]) 
         ("Review\n  9  \nDone", 9.0),
         ("Score: 15", 10.0),
         ("Score: 0", 1.0),
+        ("**Score:** 8\n\n**Strengths:**", 8.0),   # gpt-oss markdown
+        ("**Score**: 7.5", 7.5),
+        ("Score - 6", 6.0),
+        ("Scoring criteria applied. 9/10", 9.0),  # "Scoring" is not "Score"
         ("no number here", 5.0),
     ],
 )
@@ -332,6 +336,25 @@ def test_chat_sets_low_reasoning_only_for_gpt_oss(
     else:
         assert "reasoning_effort" not in sent[0]
         assert "include_reasoning" not in sent[0]
+
+
+def test_chat_warns_when_reasoning_exhausts_token_cap(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Empty content with finish_reason=length is flagged instead of passing silently."""
+
+    def create(**_: Any) -> SimpleNamespace:
+        """Return an empty, length-truncated completion."""
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=""), finish_reason="length")],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=500),
+        )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(llm, "_build_client", lambda: client)
+
+    assert llm.chat("critic", llm.MODEL, "s", "u", 0.3, 500) == ""
+    assert "critic hit max_tokens=500" in capsys.readouterr().out
 
 
 # ── Full graph (mocked) ──────────────────────────────────────────────────────

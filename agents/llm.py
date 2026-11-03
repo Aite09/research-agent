@@ -249,7 +249,12 @@ def chat(
         raise
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    text = response.choices[0].message.content or ""
+    choice = response.choices[0]
+    text = choice.message.content or ""
+    if not text and getattr(choice, "finish_reason", None) == "length":
+        # Reasoning models spend max_tokens on hidden reasoning first; an empty
+        # answer with finish_reason "length" means the cap is too low for this call.
+        print(f"[LLM] WARNING — {agent} hit max_tokens={max_tokens} before writing an answer")
     usage = response.usage
     prompt_tokens = usage.prompt_tokens if usage else 0
     completion_tokens = usage.completion_tokens if usage else 0

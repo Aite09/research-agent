@@ -24,7 +24,9 @@ from agents.llm import MODEL, chat
 from graph.state import AgentState
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MAX_TOKENS = 500
+# Deviation from the 500 in claude.md: gpt-oss reasoning tokens count against
+# this cap, and a long report can use the whole 500 before any answer is written.
+MAX_TOKENS = 1000
 TEMPERATURE = 0.3    # Low — Critic must be consistent and deterministic
 QUALITY_THRESHOLD = 7.0
 MAX_REVISIONS = 2
@@ -44,8 +46,9 @@ def _parse_score(raw: str) -> float:
     Returns:
         Float score between 1.0 and 10.0.
     """
-    # Pattern 1: "Score: 8" or "Score: 7.5"
-    match = re.search(r"score[:\s]+(\d+(?:\.\d+)?)", raw, re.IGNORECASE)
+    # Pattern 1: "Score: 8", "Score: 7.5", and markdown variants such as
+    # "**Score:** 8" — up to 5 non-word chars (":", "*", spaces) between word and number
+    match = re.search(r"score\W{0,5}?(\d+(?:\.\d+)?)", raw, re.IGNORECASE)
     if match:
         return min(10.0, max(1.0, float(match.group(1))))
 
@@ -60,7 +63,8 @@ def _parse_score(raw: str) -> float:
         return min(10.0, max(1.0, float(match.group(1))))
 
     # Fallback — conservative: assume below threshold, trigger revision
-    print("[CRITIC] WARNING — could not parse score from response. Defaulting to 5.0.")
+    snippet = " ".join(raw.split())[:120]
+    print(f"[CRITIC] WARNING — could not parse score from response {snippet!r}. Defaulting to 5.0.")
     return 5.0
 
 
