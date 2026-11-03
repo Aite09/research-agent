@@ -259,24 +259,27 @@ python -m benchmarks.run --mode search-ab --runs 10 --start 10  # search stage: 
 
 Concurrent search cut search-stage p50 latency by **64% (2.78×)**.
 
-**Full pipeline** · `openai/gpt-oss-120b` on the Groq free tier, n = 5, commit `3cf4f24`
-([summary](benchmarks/results/20261103T001513Z_pipeline_summary.json))
+**Full pipeline** · `openai/gpt-oss-120b` on the Groq free tier, n = 5, commit `4f845e9`
+([summary](benchmarks/results/20261103T010258Z_pipeline_summary.json))
 
 | Metric | Value |
 |--------|-------|
 | Successful runs | 5 / 5 |
-| End-to-end p50 (wall clock) | 25.3 s |
-| End-to-end p50 excluding rate-limit backoff | 9.7 s (p95 16.1 s) |
-| Runs throttled by free-tier limits | 4 / 5 — 18 SDK retries, 36.6 s mean wait per run |
-| List-price cost per run | p50 $0.0023 · mean $0.0031 |
-| Tokens per run (mean) | 8,760 in · 2,372 out across 3.8 LLM calls |
-| First draft accepted by critic | 4 / 5 |
+| End-to-end p50 (wall clock) | 22.7 s |
+| End-to-end p50 excluding rate-limit backoff | 9.7 s (p95 16.6 s) |
+| Runs throttled by free-tier limits | 4 / 5 — 11 SDK retries, 33.6 s mean wait per run |
+| List-price cost per run | p50 $0.0022 · mean $0.0030 |
+| Tokens per run (mean) | 8,299 in · 2,304 out across 3.8 LLM calls |
+| First draft accepted by critic | 4 / 5 (the other needed 2 revisions to reach 7/10) |
 | Sources cited per report (mean) | 11.6 |
 
 Notes: with n = 5, p95 is effectively the worst run — treat these as indicative. The one
-unthrottled run finished in 7.2 s end-to-end. In run 3 the critic's score could not be
-parsed; the 5.0 fallback caused two extra revisions (146 s, 129 s of it rate-limit wait).
-That parser was fixed afterwards (`eaa1047`), so these results include the bug.
+unthrottled run finished in 8.4 s end-to-end; throttled runs spend most of their extra time
+in the critic, which runs right after the writer's large request. An earlier run on
+different questions ([summary](benchmarks/results/20261103T001513Z_pipeline_summary.json),
+commit `3cf4f24`, before the critic score-parser fix) gave the same 9.7 s p50 excluding
+backoff. Both summaries record `+dirty` because the harness counted its own new results
+file as an uncommitted change; that check now ignores untracked files.
 
 ---
 
