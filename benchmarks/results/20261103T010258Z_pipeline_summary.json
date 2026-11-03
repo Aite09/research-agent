@@ -1,0 +1,55 @@
+{
+  "mode": "pipeline",
+  "generated_at": "2026-11-03T01:08:41.998294+00:00",
+  "git_revision": "4f845e9+dirty",
+  "model": "openai/gpt-oss-120b",
+  "search_concurrency": 5,
+  "delay_s": 30.0,
+  "queries_file": "/Users/aitezazuddin/research-agent/benchmarks/queries.txt",
+  "queries_start": 25,
+  "pricing_per_million_usd": [
+    0.15,
+    0.75
+  ],
+  "results": {
+    "runs": 5,
+    "successful_runs": 5,
+    "error_rate": 0.0,
+    "latency_s": {
+      "p50": 22.675,
+      "p95": 118.955,
+      "mean": 44.615,
+      "min": 8.357,
+      "max": 141.251
+    },
+    "latency_excluding_retry_wait_s": {
+      "p50": 9.675,
+      "p95": 16.555
+    },
+    "rate_limits": {
+      "runs_with_retries": 4,
+      "retries_total": 11,
+      "retry_wait_s_mean": 33.6
+    },
+    "stage_p50_s": {
+      "planner": 0.567,
+      "search": 4.068,
+      "writer": 3.046,
+      "critic": 14.155
+    },
+    "cost_usd_per_run": {
+      "mean": 0.002973,
+      "p50": 0.002178,
+      "total_all_runs": 0.014867
+    },
+    "tokens_per_run_mean": {
+      "prompt": 8299,
+      "completion": 2304
+    },
+    "llm_calls_per_run_mean": 3.8,
+    "quality_score_mean": 7.4,
+    "accepted_first_draft_rate": 0.8,
+    "revisions_mean": 0.4,
+    "sources_per_report_mean": 11.6
+  }
+}

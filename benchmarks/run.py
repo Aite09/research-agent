@@ -142,12 +142,18 @@ def rounded(value: Optional[float], digits: int = 3) -> Optional[float]:
 
 
 def git_revision() -> str:
-    """Short commit SHA of the code being benchmarked, '+dirty' if uncommitted changes exist."""
+    """
+    Short commit SHA of the code being benchmarked, '+dirty' if tracked files have
+    uncommitted changes. Untracked files are ignored — the results this run writes
+    are untracked and would otherwise mark every run dirty.
+    """
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
         ).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True
+        ).stdout.strip()
         return f"{sha}+dirty" if dirty else sha
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
@@ -392,6 +398,7 @@ def main() -> None:
     if args.mode == "search-ab" and args.search_concurrency == 1:
         raise SystemExit("search-ab compares against concurrency 1; pass --search-concurrency > 1")
 
+    revision = git_revision()   # before the run, so it describes the code that ran
     queries = load_queries(args.queries, args.runs, args.start)
     os.environ["SEARCH_CONCURRENCY"] = str(args.search_concurrency)
 
@@ -427,7 +434,7 @@ def main() -> None:
     summary = {
         "mode": args.mode,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "git_revision": git_revision(),
+        "git_revision": revision,
         "model": llm.MODEL,
         "search_concurrency": args.search_concurrency,
         "delay_s": args.delay,
